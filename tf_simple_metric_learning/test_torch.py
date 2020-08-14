@@ -1,27 +1,25 @@
 import numpy as np
 import torch
 from pytorch_metric_learning.losses import ArcFaceLoss
+from pytorch_metric_learning.reducers import DoNothingReducer
 
 np.random.seed(1)
-BATCH_SIZE = 1
+BATCH_SIZE = 2
 NUM_CLASSES = 10
 EMBEDDING_SIZE= 32
 
 
 def test():
     inputs = np.random.normal(0, 1, size=(BATCH_SIZE, EMBEDDING_SIZE))
-    # inputs = np.ones((BATCH_SIZE, EMBEDDING_SIZE), dtype=np.float32)
     labels = np.random.randint(0, NUM_CLASSES, size=BATCH_SIZE)
     w = np.random.normal(0, 1, size=(EMBEDDING_SIZE, NUM_CLASSES))
-    # w = np.zeros((EMBEDDING_SIZE, NUM_CLASSES), dtype=np.float32)
-    # w[:, 0] = 1
-    # w[:, 2] = -1
     print('inputs:', inputs)
     print('labels:', labels)
     print('w:', w)
     
     layer = ArcFaceLoss(num_classes=NUM_CLASSES,
-                        embedding_size=EMBEDDING_SIZE)
+                        embedding_size=EMBEDDING_SIZE,
+                        reducer=DoNothingReducer())
     layer.W = torch.nn.Parameter(torch.from_numpy(w))
     print('W', layer.W)
     print('margin:', layer.margin)

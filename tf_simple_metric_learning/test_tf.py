@@ -1,9 +1,9 @@
 import numpy as np
 import tensorflow as tf
-from layers import ArcFace
+from layers import CosineSimilarity, ArcFaceLoss
 
 np.random.seed(1)
-BATCH_SIZE = 1
+BATCH_SIZE = 2
 NUM_CLASSES = 10
 EMBEDDING_SIZE= 32
 
@@ -16,24 +16,23 @@ def test():
     print('labels:', labels)
     print('w:', w)
 
-    layer = ArcFace(margin=np.radians(28.6))
-    print('margin:', layer.margin)
-    print('scale:', layer.scale)    
+    cos_layer = CosineSimilarity(NUM_CLASSES)
+    arcface = ArcFaceLoss(margin=np.radians(28.6), reduction='none')
+    print('margin:', arcface.margin)
+    print('scale:', arcface.scale)
     
     inputs_tf = tf.convert_to_tensor(inputs, dtype=tf.float32)
     labels_tf = tf.convert_to_tensor(labels, dtype=tf.int32)
     labels_onehot = tf.one_hot(labels_tf, depth=NUM_CLASSES)
     print('one_hot:',labels_onehot)
-    info = layer([inputs_tf, labels_onehot], training=True)
+    cos = cos_layer(inputs_tf)
+    _ = arcface(labels_onehot, cos)
 
-    layer.W.assign(tf.convert_to_tensor(w, dtype=tf.float32))
-    info = layer([inputs_tf, labels_onehot], training=True)    
+    cos_layer.W.assign(tf.convert_to_tensor(w, dtype=tf.float32))
+    cos = cos_layer(inputs_tf)
+    loss = arcface(labels_onehot, cos)
+    print(loss)
 
-    print('cos:', info['cos'])
-    print('logits:', info['logits'])
-    loss = tf.keras.losses.categorical_crossentropy(labels_onehot, info['logits'],
-                                                    from_logits=True)
-    print(tf.reduce_mean(loss))
-
+    
 if __name__ == "__main__":
     test()
