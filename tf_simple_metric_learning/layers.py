@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers, losses
+from tensorflow.keras import layers
 import tensorflow_probability as tfp
 
 
@@ -25,35 +25,33 @@ class CosineSimilarity(layers.Layer):
         return cos
 
 
-def arcface_loss(y_true, y_pred, margin=0.5, scale=64): 
+class ArcFace(layers.Layer):
     """
     Implementation of https://arxiv.org/pdf/1801.07698.pdf
-    """   
-    theta = tf.acos(tf.clip_by_value(y_pred, -1, 1))
-    cos_add = tf.cos(theta + margin)
-    
-    mask = tf.cast(y_true, dtype=cos_add.dtype)
-    logits = mask*cos_add + (1-mask)*y_pred
-    logits *= scale
-    loss = losses.categorical_crossentropy(y_true, logits, from_logits=True)
-    return loss
-
-
-class ArcFaceLoss(losses.Loss):
-    """
-    Implementation of https://arxiv.org/pdf/1801.07698.pdf
-    """    
-    def __init__(self,
-                 margin=0.5,
-                 scale=64,
-                 reduction='auto',
-                 name='arcface_loss'):
-        super().__init__(reduction=reduction, name=name)
+    """       
+    def __init__(self, num_classes, margin=0.5, scale=64, **kwargs):
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
         self.margin = margin
         self.scale = scale
-        
-    def call(self, y_true, y_pred):
-        return arcface_loss(y_true, y_pred, self.margin, self.scale)
+
+        self.cos_similarity = CosineSimilarity(num_classes)
+
+    def call(self, inputs, training):
+        # If not training (prediction), labels are ignored
+        feature, labels = inputs
+        cos = self.cos_similarity(feature)
+
+        if training:
+            theta = tf.acos(tf.clip_by_value(cos, -1, 1))
+            cos_add = tf.cos(theta + self.margin)
+    
+            mask = tf.cast(labels, dtype=cos_add.dtype)
+            logits = mask*cos_add + (1-mask)*cos
+            logits *= self.scale
+            return logits
+        else:
+            return cos
 
 
 class AdaCos(layers.Layer):
@@ -61,29 +59,135 @@ class AdaCos(layers.Layer):
         super().__init__(**kwargs)
         self.num_classes = num_classes
 
+        self.cos_similarity = CosineSimilarity(num_classes)        
         self.scale = tf.Variable(tf.sqrt(2)*tf.math.log(num_classes - 1),
                                  trainable=False)
 
     def call(self, inputs, training):
-        # In inference, labels is ignored
-        cos, labels = inputs
-        labels = tf.cast(labels, dtype=cos.dtype)
-        
-        # Collect cosine values at only false labels
-        B = (1 - labels)*tf.exp(self.scale*cos)
-        B_avg = tf.reduce_mean(tf.reduce_sum(B, axis=-1), axis=0)
-
-        theta = tf.acos(tf.clip_by_value(cos, -1, 1))
-        # Collect cosine at true labels
-        theta_true = tf.reduce_sum(labels*theta, axis=-1)
-        # get median (=50-percentile)
-        theta_med = tfp.stats.percentile(theta_true, q=50)
-
-        scale = tf.math.log(B_avg) / tf.cos(tf.minimum(np.pi/4, theta_med))
+        # In inference, labels are ignored
+        feature, labels = inputs
+        cos = self.cos_similarity(feature)
 
         if training:
-            self.scale.assign(scale)
+            mask = tf.cast(labels, dtype=cos.dtype)
+        
+            # Collect cosine values at only false labels
+            B = (1 - mask)*tf.exp(self.scale*cos)
+            B_avg = tf.reduce_mean(tf.reduce_sum(B, axis=-1), axis=0)
+
+            theta = tf.acos(tf.clip_by_value(cos, -1, 1))
+            # Collect cosine at true labels
+            theta_true = tf.reduce_sum(mask*theta, axis=-1)
+            # get median (=50-percentile)
+            theta_med = tfp.stats.percentile(theta_true, q=50)
+ 
+            scale = tf.math.log(B_avg) / tf.cos(tf.minimum(np.pi/4, theta_med))
+            scale = tf.stop_gradient(scale)
+            logits = scale*cos
             
-        scale = tf.stop_gradient(scale)
-        logits = scale*cos
-        return logits
+            self.scale.assign(scale)
+            return logits
+        else:
+            return cos
+
+
+class CircleLoss(layers.Layer):
+    """
+    Implementation of https://arxiv.org/abs/2002.10857 (class-level label version)
+    """
+    def __init__(self, num_classes, margin=0.25, scale=256, **kwargs):
+        """
+        Args
+          num_classes: an int value, number of target classes
+          margin: a float value, margin for the true label (default 0.25)
+          scale: a float value, final scale value,
+            stated as gamma in the original paper (default 256)
+
+        Returns:
+          a tf.keras.layers.Layer object, outputs logit values of each class
+
+        In the original paper, margin and scale (=gamma) are set depends on tasks
+        - Face recognition: m=0.25, scale=256 (default)
+        - Person re-identification: m=0.25, scale=256
+        - Fine-grained image retrieval: m=0.4, scale=64
+        """
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.margin = margin
+        self.scale = scale
+
+        self._Op = 1 + margin # O_positive
+        self._On = -margin    # O_negative
+        self._Dp = 1 - margin # Delta_positive
+        self._Dn = margin     # Delta_negative
+
+        self.cos_similarity = CosineSimilarity(num_classes)
+
+    def call(self, inputs, training):
+        feature, labels = inputs
+        # cos = self.cos_similarity(feature)
+        x = tf.nn.l2_normalize(feature, axis=-1)
+        cos = tf.matmul(x, x, transpose_b=True) # (batch_size, batch_size)
+        print('cos:', cos)
+
+        if training:
+            # pairwise version
+            mask = tf.cast(labels, dtype=cos.dtype)
+            mask_p = tf.matmul(mask, mask, transpose_b=True)
+            mask_n = 1 - mask_p
+            mask_p = mask_p - tf.eye(mask_p.shape[0])
+            print('mask_p:', mask_p)
+            print('mask_n:', mask_n)
+
+            logits_p = - self.scale * tf.nn.relu(self._Op - cos) * (cos - self._Dp)
+            logits_n = self.scale * tf.nn.relu(cos - self._On) * (cos - self._Dn)
+
+            print('logits_p:', mask_p*logits_p)
+            print('logits_n:', mask_n*logits_n)
+
+            logits_p = tf.where(mask_p == 1, logits_p, -np.inf)
+            logits_n = tf.where(mask_n == 1, logits_n, -np.inf)
+
+            logsumexp_p = tf.reduce_logsumexp(logits_p, axis=-1)
+            logsumexp_n = tf.reduce_logsumexp(logits_n, axis=-1)
+
+            mask_p_row = tf.reduce_max(mask_p, axis=-1)
+            mask_n_row = tf.reduce_max(mask_n, axis=-1)
+            logsumexp_p = tf.where(mask_p_row == 1, logsumexp_p, 0)
+            logsumexp_n = tf.where(mask_n_row == 1, logsumexp_n, 0)
+            # logsumexp_p = tf.reduce_max(mask_p, axis=-1)*logsumexp_p
+            # logsumexp_n = tf.reduce_max(mask_n, axis=-1)*logsumexp_n
+            
+            # sumexp_p = tf.reduce_sum(tf.exp(-mask_p*logits_p - 10**8*mask_n), axis=-1)
+            # sumexp_n = tf.reduce_sum(tf.exp(mask_n*logits_n - 10**8*mask_p), axis=-1)
+
+            # print('logsumexp_p:', tf.math.log(sumexp_p))
+            # print('logsumexp_n:', tf.math.log(sumexp_n))
+
+            # losses = tf.math.log(sumexp_p + sumexp_n)
+
+            print('logsumexp_pos:', logsumexp_p)
+            print('logsumexp_neg:', logsumexp_n)
+
+            losses = tf.nn.softplus(logsumexp_p + logsumexp_n)
+
+            one_rows = tf.reduce_max(mask_p, axis=-1)*tf.reduce_max(mask_n, axis=-1)
+            print('one_rows:', one_rows)
+            losses = one_rows * losses
+
+            # class-lebel version
+            # mask = tf.cast(labels, dtype=cos.dtype)
+            # print('cos:', cos)
+
+            # alpha_p = tf.nn.relu(self._Op - cos)
+            # alpha_n = tf.nn.relu(cos - self._On)
+
+            # logits_p = self.scale*alpha_p*(cos - self._Dp)
+            # logits_n = self.scale*alpha_n*(cos - self._Dn)
+
+            # logits = mask*logits_p + (1-mask)*logits_n
+            # return logits
+            return losses
+        else:
+            return cos
+        
