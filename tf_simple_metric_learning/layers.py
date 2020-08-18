@@ -93,7 +93,7 @@ class AdaCos(layers.Layer):
 
 class CircleLoss(layers.Layer):
     """
-    Implementation of https://arxiv.org/abs/2002.10857 (class-level label version)
+    Implementation of https://arxiv.org/abs/2002.10857 (pair-level label version)
     """
     def __init__(self, num_classes, margin=0.25, scale=256, **kwargs):
         """
@@ -174,20 +174,62 @@ class CircleLoss(layers.Layer):
             one_rows = tf.reduce_max(mask_p, axis=-1)*tf.reduce_max(mask_n, axis=-1)
             print('one_rows:', one_rows)
             losses = one_rows * losses
-
-            # class-lebel version
-            # mask = tf.cast(labels, dtype=cos.dtype)
-            # print('cos:', cos)
-
-            # alpha_p = tf.nn.relu(self._Op - cos)
-            # alpha_n = tf.nn.relu(cos - self._On)
-
-            # logits_p = self.scale*alpha_p*(cos - self._Dp)
-            # logits_n = self.scale*alpha_n*(cos - self._Dn)
-
-            # logits = mask*logits_p + (1-mask)*logits_n
-            # return logits
             return losses
         else:
             return cos
         
+
+class CircleLossCL(layers.Layer):
+    """
+    Implementation of https://arxiv.org/abs/2002.10857 (class-level label version)
+    """    
+    def __init__(self, num_classes, margin=0.25, scale=256, **kwargs):
+        """
+        Args
+          num_classes: an int value, number of target classes
+          margin: a float value, margin for the true label (default 0.25)
+          scale: a float value, final scale value,
+            stated as gamma in the original paper (default 256)
+
+        Returns:
+          a tf.keras.layers.Layer object, outputs logit values of each class
+
+        In the original paper, margin and scale (=gamma) are set depends on tasks
+        - Face recognition: m=0.25, scale=256 (default)
+        - Person re-identification: m=0.25, scale=256
+        - Fine-grained image retrieval: m=0.4, scale=64
+        """
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.margin = margin
+        self.scale = scale
+
+        self._Op = 1 + margin # O_positive
+        self._On = -margin    # O_negative
+        self._Dp = 1 - margin # Delta_positive
+        self._Dn = margin     # Delta_negative
+
+        self.cos_similarity = CosineSimilarity(num_classes)
+
+    def call(self, inputs, training):
+        feature, labels = inputs
+        cos = self.cos_similarity(feature)
+        
+        if training:
+            # class-lebel version
+            mask = tf.cast(labels, dtype=cos.dtype)
+            mask_p = mask - tf.eye(mask.shape[0])
+            mask_n = 1 - mask
+            print('cos:', cos)
+
+            alpha_p = tf.nn.relu(self._Op - cos)
+            alpha_n = tf.nn.relu(cos - self._On)
+
+            logits_p = self.scale*alpha_p*(cos - self._Dp)
+            logits_n = self.scale*alpha_n*(cos - self._Dn)
+
+            # logits = mask*logits_p + (1-mask)*logits_n
+            logits = mask_p*logits_p + mask_n*logits_n
+            return logits
+        else:
+            return cos
