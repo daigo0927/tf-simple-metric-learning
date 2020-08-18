@@ -59,7 +59,7 @@ class AdaCos(layers.Layer):
         super().__init__(**kwargs)
         self.num_classes = num_classes
 
-        self.cos_similarity = CosineSimilarity(num_classes)        
+        self.cos_similarity = CosineSimilarity(num_classes)
         self.scale = tf.Variable(tf.sqrt(2)*tf.math.log(num_classes - 1),
                                  trainable=False)
 
@@ -95,10 +95,9 @@ class CircleLoss(layers.Layer):
     """
     Implementation of https://arxiv.org/abs/2002.10857 (pair-level label version)
     """
-    def __init__(self, num_classes, margin=0.25, scale=256, **kwargs):
+    def __init__(self, margin=0.25, scale=256, **kwargs):
         """
         Args
-          num_classes: an int value, number of target classes
           margin: a float value, margin for the true label (default 0.25)
           scale: a float value, final scale value,
             stated as gamma in the original paper (default 256)
@@ -112,7 +111,6 @@ class CircleLoss(layers.Layer):
         - Fine-grained image retrieval: m=0.4, scale=64
         """
         super().__init__(**kwargs)
-        self.num_classes = num_classes
         self.margin = margin
         self.scale = scale
 
@@ -121,14 +119,10 @@ class CircleLoss(layers.Layer):
         self._Dp = 1 - margin # Delta_positive
         self._Dn = margin     # Delta_negative
 
-        self.cos_similarity = CosineSimilarity(num_classes)
-
     def call(self, inputs, training):
         feature, labels = inputs
-        # cos = self.cos_similarity(feature)
         x = tf.nn.l2_normalize(feature, axis=-1)
         cos = tf.matmul(x, x, transpose_b=True) # (batch_size, batch_size)
-        print('cos:', cos)
 
         if training:
             # pairwise version
@@ -136,14 +130,9 @@ class CircleLoss(layers.Layer):
             mask_p = tf.matmul(mask, mask, transpose_b=True)
             mask_n = 1 - mask_p
             mask_p = mask_p - tf.eye(mask_p.shape[0])
-            print('mask_p:', mask_p)
-            print('mask_n:', mask_n)
 
             logits_p = - self.scale * tf.nn.relu(self._Op - cos) * (cos - self._Dp)
             logits_n = self.scale * tf.nn.relu(cos - self._On) * (cos - self._Dn)
-
-            print('logits_p:', mask_p*logits_p)
-            print('logits_n:', mask_n*logits_n)
 
             logits_p = tf.where(mask_p == 1, logits_p, -np.inf)
             logits_n = tf.where(mask_n == 1, logits_n, -np.inf)
@@ -155,25 +144,11 @@ class CircleLoss(layers.Layer):
             mask_n_row = tf.reduce_max(mask_n, axis=-1)
             logsumexp_p = tf.where(mask_p_row == 1, logsumexp_p, 0)
             logsumexp_n = tf.where(mask_n_row == 1, logsumexp_n, 0)
-            # logsumexp_p = tf.reduce_max(mask_p, axis=-1)*logsumexp_p
-            # logsumexp_n = tf.reduce_max(mask_n, axis=-1)*logsumexp_n
-            
-            # sumexp_p = tf.reduce_sum(tf.exp(-mask_p*logits_p - 10**8*mask_n), axis=-1)
-            # sumexp_n = tf.reduce_sum(tf.exp(mask_n*logits_n - 10**8*mask_p), axis=-1)
-
-            # print('logsumexp_p:', tf.math.log(sumexp_p))
-            # print('logsumexp_n:', tf.math.log(sumexp_n))
-
-            # losses = tf.math.log(sumexp_p + sumexp_n)
-
-            print('logsumexp_pos:', logsumexp_p)
-            print('logsumexp_neg:', logsumexp_n)
 
             losses = tf.nn.softplus(logsumexp_p + logsumexp_n)
 
-            one_rows = tf.reduce_max(mask_p, axis=-1)*tf.reduce_max(mask_n, axis=-1)
-            print('one_rows:', one_rows)
-            losses = one_rows * losses
+            mask_paired = mask_p_row*mask_n_row
+            losses = mask_paired * losses
             return losses
         else:
             return cos
@@ -218,9 +193,6 @@ class CircleLossCL(layers.Layer):
         if training:
             # class-lebel version
             mask = tf.cast(labels, dtype=cos.dtype)
-            mask_p = mask - tf.eye(mask.shape[0])
-            mask_n = 1 - mask
-            print('cos:', cos)
 
             alpha_p = tf.nn.relu(self._Op - cos)
             alpha_n = tf.nn.relu(cos - self._On)
@@ -228,8 +200,7 @@ class CircleLossCL(layers.Layer):
             logits_p = self.scale*alpha_p*(cos - self._Dp)
             logits_n = self.scale*alpha_n*(cos - self._Dn)
 
-            # logits = mask*logits_p + (1-mask)*logits_n
-            logits = mask_p*logits_p + mask_n*logits_n
+            logits = mask*logits_p + (1-mask)*logits_n
             return logits
         else:
             return cos
