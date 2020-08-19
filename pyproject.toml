@@ -5,9 +5,9 @@ description = "Metric learning layers with tf.keras"
 authors = ["Daigo Hirooka <daigo.hirooka@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.7"
-tensorflow = "^2.3.0"
-tensorflow-probability = "^0.11.0"
+python = "^3.6"
+tensorflow = "^2.1.0"
+tensorflow-probability = "^0.9.0"
 
 [tool.poetry.dev-dependencies]
 
