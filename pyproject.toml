@@ -5,7 +5,6 @@ description = "Metric learning layers with tf.keras"
 authors = ["Daigo Hirooka <daigo.hirooka@gmail.com>"]
 repository = "https://github.com/daigo0927/tf-simple-metric-learning"
 readme = "README.md"
-license = "MIT License"
 
 [tool.poetry.dependencies]
 python = "^3.6"
