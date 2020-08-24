@@ -60,7 +60,7 @@ class AdaCos(layers.Layer):
         self.num_classes = num_classes
 
         self.cos_similarity = CosineSimilarity(num_classes)
-        self.scale = tf.Variable(tf.sqrt(2)*tf.math.log(num_classes - 1),
+        self.scale = tf.Variable(tf.sqrt(2.0)*tf.math.log(num_classes - 1),
                                  trainable=False)
 
     def call(self, inputs, training):
