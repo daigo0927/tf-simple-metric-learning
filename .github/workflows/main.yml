@@ -35,14 +35,11 @@ jobs:
       uses: abatilo/actions-poetry@v2.0.0
       with:
         poetry-version: ${{ matrix.poetry-version }}
-    - name: Poetry installation and test
-      run: |
-        poetry install
-        which pip
     - name: Install dependencies
       run: |
         python -m pip install -U pip
         pip install flake8 pytest
-        which pip
+    - name: Install package dependencies
+      run: pip install git+https://github.com/daigo0927/tf-simple-metric-learning.git@develop
     - name: Test with pytest
       run: pytest
