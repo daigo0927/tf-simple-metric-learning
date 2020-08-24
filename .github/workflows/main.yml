@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.6] # [3.6, 3.7, 3.8]
-        poetry-version: [1.0] # [1.0, 1.0.10]
+        python-version: [3.6, 3.7, 3.8]
+        poetry-version: [1.0, 1.0.10]
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
     # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
@@ -27,15 +27,7 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: ${{ matrix.python-version }}
-    
-    # Runs a single command using the runners shell (toy sanple)
-    - name: Run a one-line script
-      run: echo Hello, world!
-    - name: Run image
-      uses: abatilo/actions-poetry@v2.0.0
-      with:
-        poetry-version: ${{ matrix.poetry-version }}
-    - name: Install dependencies
+    - name: Install basic dependencies
       run: |
         python -m pip install -U pip
         pip install flake8 pytest
