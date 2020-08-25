@@ -50,7 +50,7 @@ model = tf.keras.Model(inputs=[inputs, labels], outputs=logits)
 model.summary()
 ```
 
-**Note that you should feed labels as input** into model in training because these layers requires labels to forward.
+**Note that you should feed labels as input** into model in training because these layers require labels to forward.
 
 In evaluation or prediction, above model requires both images and labels but labels is ignored in those metric learning layers. We only need to use dummy labels (ignored) with the target images because we can't access labels in evaluation or prediction.
 
